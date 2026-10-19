@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inventario Masivo — DIB</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --ink:#1a1d23; --ink-dim:#5b616e;
+    --line:#e2e4e9; --accent:#2f6fed; --accent-ink:#ffffff;
+    --ok:#1a8a4a; --ok-bg:#e8f6ee; --warn:#b4720a; --warn-bg:#fdf2e0;
+    --bad:#c0362c; --bad-bg:#fcebe9; --info-bg:#eef2fb;
+    --radius:14px; --gap:12px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14161a; --card:#1d2025; --ink:#eef0f3; --ink-dim:#9aa1ad;
+      --line:#2b2f37; --accent:#5a8dff; --accent-ink:#0b0d10;
+      --ok:#58d08a; --ok-bg:#133425; --warn:#e8a93d; --warn-bg:#3a2c0f;
+      --bad:#f0695f; --bad-bg:#3a1917; --info-bg:#192033;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14161a; --card:#1d2025; --ink:#eef0f3; --ink-dim:#9aa1ad;
+    --line:#2b2f37; --accent:#5a8dff; --accent-ink:#0b0d10;
+    --ok:#58d08a; --ok-bg:#133425; --warn:#e8a93d; --warn-bg:#3a2c0f;
+    --bad:#f0695f; --bad-bg:#3a1917; --info-bg:#192033;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:14px 14px 90px;
+    min-height:100vh;
+  }
+  h1,h2,h3{margin:0 0 10px}
+  h1{font-size:19px}
+  h2{font-size:16px}
+  h3{font-size:14px;color:var(--ink-dim);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px; margin-bottom:var(--gap);
+  }
+  .row{display:flex; align-items:center; justify-content:space-between; gap:10px}
+  .muted{color:var(--ink-dim)}
+  .pill{
+    display:inline-flex; align-items:center; gap:4px; padding:3px 9px;
+    border-radius:999px; font-size:12px; font-weight:600;
+  }
+  .pill-a{background:var(--bad-bg); color:var(--bad)}
+  .pill-b{background:var(--warn-bg); color:var(--warn)}
+  .pill-c{background:var(--info-bg); color:var(--accent)}
+  .pill-ok{background:var(--ok-bg); color:var(--ok)}
+  .pill-warn{background:var(--warn-bg); color:var(--warn)}
+  .pill-bad{background:var(--bad-bg); color:var(--bad)}
+  button{
+    font:inherit; border:none; border-radius:10px; padding:12px 16px;
+    background:var(--accent); color:var(--accent-ink); font-weight:600;
+    cursor:pointer; -webkit-tap-highlight-color:transparent;
+  }
+  button.secondary{background:var(--info-bg); color:var(--accent)}
+  button.ghost{background:transparent; color:var(--ink-dim); padding:8px 10px}
+  button:disabled{opacity:.45; cursor:default}
+  button:active{transform:scale(.98)}
+  input, select{
+    font:inherit; width:100%; padding:11px 12px; border-radius:10px;
+    border:1px solid var(--line); background:var(--bg); color:var(--ink);
+  }
+  label{display:block; font-size:12px; color:var(--ink-dim); margin:10px 0 4px}
+  .stack > * + *{margin-top:10px}
+  .topbar{
+    position:sticky; top:0; z-index:5; background:var(--bg);
+    padding:10px 0 8px; margin:-14px -14px 10px; padding-left:14px; padding-right:14px;
+    border-bottom:1px solid var(--line);
+  }
+  .list-item{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:13px 2px; border-bottom:1px solid var(--line); gap:10px;
+  }
+  .list-item:last-child{border-bottom:none}
+  .list-item:active{background:var(--info-bg)}
+  .tabs{display:flex; gap:6px; margin-bottom:12px}
+  .tab{
+    flex:1; text-align:center; padding:9px 4px; border-radius:10px;
+    background:var(--card); border:1px solid var(--line); font-size:13px; font-weight:600;
+    color:var(--ink-dim); cursor:pointer;
+  }
+  .tab.active{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+  .badge-count{
+    display:inline-flex; min-width:18px; height:18px; padding:0 5px; align-items:center;
+    justify-content:center; border-radius:999px; background:var(--bad); color:#fff;
+    font-size:11px; font-weight:700; margin-left:6px;
+  }
+  .num-row{display:flex; align-items:center; gap:10px; margin:14px 0}
+  .num-row button{width:52px; height:52px; font-size:22px; border-radius:14px; flex:none}
+  .num-row input{text-align:center; font-size:26px; font-weight:700; height:52px}
+  .toast{
+    position:fixed; left:14px; right:14px; bottom:14px; z-index:50;
+    background:var(--ink); color:var(--bg); padding:12px 16px; border-radius:12px;
+    font-size:14px; text-align:center; opacity:0; transform:translateY(10px);
+    transition:opacity .2s, transform .2s; pointer-events:none;
+  }
+  .toast.show{opacity:1; transform:translateY(0)}
+  .empty{text-align:center; padding:30px 10px; color:var(--ink-dim)}
+  .salida-chip{
+    display:flex; justify-content:space-between; font-size:12px; padding:6px 8px;
+    background:var(--info-bg); border-radius:8px; margin-top:6px;
+  }
+  .spinner{
+    width:16px;height:16px;border-radius:50%;border:2px solid var(--line);
+    border-top-color:var(--accent); animation:spin .7s linear infinite; display:inline-block;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  a.link{color:var(--accent); text-decoration:none; font-weight:600}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+/* =========================================================================
+   Inventario Masivo DIB — página de conteo (celular)
+   Backend: Supabase (RPC sobre funciones security definer). Nunca toca
+   tablas directo: todo pasa por app_* para que el ciego sea real.
+   ========================================================================= */
+
+const SUPABASE_URL = "https://pknlbaijbksgkdowwcmm.supabase.co";
+const SUPABASE_KEY = "sb_publishable_yS4df8EDHR-_nRyZmyLSPA_xubpFFiQ";
+
+async function rpc(fn, args){
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+    },
+    body: JSON.stringify(args || {}),
+  });
+  if(!r.ok){
+    let msg = `Error ${r.status}`;
+    try{ const j = await r.json(); msg = j.message || j.hint || msg; }catch(e){}
+    throw new Error(msg);
+  }
+  const txt = await r.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+function toast(msg, ms=2600){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>t.classList.remove("show"), ms);
+}
+
+function fmt(n){
+  if(n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("es-CL", {maximumFractionDigits:2});
+}
+function fmtMoney(n){
+  if(n === null || n === undefined) return "—";
+  return "$" + Math.round(Number(n)).toLocaleString("es-CL");
+}
+function fmtFecha(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("es-CL", {day:"2-digit", month:"2-digit"}) + " "
+       + d.toLocaleTimeString("es-CL", {hour:"2-digit", minute:"2-digit"});
+}
+
+/* ----------------------------- estado global ---------------------------- */
+const S = {
+  usuario: null,       // {usuario_id, nombre, rol}
+  sesion: null,        // {sesion_id, nombre, bodega, ...}
+  pantalla: "login",   // login | sesiones | menu | ubicaciones | lineas | contar | recuentos | diferidas | supervisor
+  ubicActual: null,
+  lineaActual: null,
+  lineasUbicacion: [],
+  cargando: false,
+};
+
+const KEY_SESION = "inv_masivo_sesion_v1";
+
+function guardarSesionLocal(){
+  try{
+    localStorage.setItem(KEY_SESION, JSON.stringify({
+      usuario: S.usuario, sesion: S.sesion
+    }));
+  }catch(e){}
+}
+function cargarSesionLocal(){
+  try{
+    const raw = localStorage.getItem(KEY_SESION);
+    if(!raw) return;
+    const d = JSON.parse(raw);
+    if(d.usuario && d.sesion){ S.usuario = d.usuario; S.sesion = d.sesion; S.pantalla = "menu"; }
+  }catch(e){}
+}
+function cerrarSesionLocal(){
+  try{ localStorage.removeItem(KEY_SESION); }catch(e){}
+  S.usuario = null; S.sesion = null; S.pantalla = "login";
+  render();
+}
+
+/* ------------------------------- render raíz ----------------------------- */
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  if(S.pantalla === "login")        app.appendChild(viewLogin());
+  else if(S.pantalla === "sesiones") app.appendChild(viewSesiones());
+  else if(S.pantalla === "menu")     app.appendChild(viewMenu());
+  else if(S.pantalla === "ubicaciones") app.appendChild(viewUbicaciones());
+  else if(S.pantalla === "lineas")   app.appendChild(viewLineas());
+  else if(S.pantalla === "contar")   app.appendChild(viewContar());
+  else if(S.pantalla === "recuentos") app.appendChild(viewRecuentos());
+  else if(S.pantalla === "diferidas") app.appendChild(viewDiferidas());
+  else if(S.pantalla === "supervisor") app.appendChild(viewSupervisor());
+}
+
+function topbar(titulo, onBack){
+  const bar = document.createElement("div");
+  bar.className = "topbar row";
+  bar.innerHTML = `
+    <div class="row" style="gap:10px">
+      ${onBack ? `<button class="ghost" id="btn-back">&larr;</button>` : ""}
+      <h1 style="margin:0">${titulo}</h1>
+    </div>
+    <div class="muted" style="font-size:12px;text-align:right">
+      ${S.usuario ? S.usuario.nombre : ""}<br>${S.sesion ? S.sesion.nombre : ""}
+    </div>
+  `;
+  if(onBack) bar.querySelector("#btn-back").onclick = onBack;
+  return bar;
+}
+
+/* --------------------------------- LOGIN --------------------------------- */
+function viewLogin(){
+  const el = document.createElement("div");
+  el.innerHTML = `
+    <div style="text-align:center;padding:36px 0 18px">
+      <h1 style="font-size:22px">Inventario Masivo</h1>
+      <div class="muted">DIB / Decoexpress</div>
+    </div>
+    <div class="card stack">
+      <label>Nombre</label>
+      <input id="in-nombre" placeholder="Ej: Contador 1" autocomplete="username">
+      <label>PIN</label>
+      <input id="in-pin" type="password" inputmode="numeric" placeholder="••••" autocomplete="current-password">
+      <button id="btn-login" style="width:100%;margin-top:6px">Entrar</button>
+      <div id="login-err" class="muted" style="color:var(--bad);display:none"></div>
+    </div>
+  `;
+  el.querySelector("#btn-login").onclick = async ()=>{
+    const nombre = el.querySelector("#in-nombre").value.trim();
+    const pin = el.querySelector("#in-pin").value.trim();
+    const errBox = el.querySelector("#login-err");
+    errBox.style.display = "none";
+    if(!nombre || !pin){ errBox.textContent = "Completa nombre y PIN."; errBox.style.display="block"; return; }
+    const btn = el.querySelector("#btn-login");
+    btn.disabled = true; btn.textContent = "Entrando…";
+    try{
+      const res = await rpc("app_login", {p_nombre: nombre, p_pin: pin});
+      if(!res || res.length === 0){
+        errBox.textContent = "Nombre o PIN incorrecto.";
+        errBox.style.display = "block";
+        btn.disabled = false; btn.textContent = "Entrar";
+        return;
+      }
+      S.usuario = res[0];
+      S.pantalla = "sesiones";
+      render();
+      cargarSesionesAbiertas();
+    }catch(e){
+      errBox.textContent = "No se pudo conectar: " + e.message;
+      errBox.style.display = "block";
+      btn.disabled = false; btn.textContent = "Entrar";
+    }
+  };
+  return el;
+}
+
+/* ------------------------------ SESIONES --------------------------------- */
+let _sesiones = [];
+async function cargarSesionesAbiertas(){
+  try{
+    _sesiones = await rpc("app_sesiones_abiertas", {});
+  }catch(e){
+    toast("Error cargando sesiones: " + e.message);
+    _sesiones = [];
+  }
+  if(S.pantalla === "sesiones") render();
+}
+
+function viewSesiones(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Elige sesión", ()=>{ S.usuario=null; S.pantalla="login"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  if(_sesiones === null){
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else if(_sesiones.length === 0){
+    card.innerHTML = `<div class="empty">No hay sesiones de inventario abiertas ahora.<br><br>
+      <button class="secondary" id="btn-reload">Reintentar</button></div>`;
+  } else {
+    card.innerHTML = `<h3>Sesiones abiertas</h3>`;
+    _sesiones.forEach(s=>{
+      const item = document.createElement("div");
+      item.className = "list-item";
+      item.style.cursor = "pointer";
+      item.innerHTML = `
+        <div>
+          <div style="font-weight:600">${s.nombre}</div>
+          <div class="muted" style="font-size:12px">
+            ${(s.bodegas && s.bodegas.length ? s.bodegas.join(" + ") : s.bodega)}
+            ${s.categorias && s.categorias.length ? " · " + s.categorias.join(", ") : ""}
+          </div>
+        </div>
+        <span class="muted">&rsaquo;</span>`;
+      item.onclick = ()=>{
+        S.sesion = s;
+        guardarSesionLocal();
+        S.pantalla = "menu";
+        render();
+      };
+      card.appendChild(item);
+    });
+  }
+  el.appendChild(card);
+  const btnReload = card.querySelector("#btn-reload");
+  if(btnReload) btnReload.onclick = ()=>{ _sesiones = null; render(); cargarSesionesAbiertas(); };
+  return el;
+}
+
+/* -------------------------------- MENÚ ------------------------------------ */
+function viewMenu(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Menú", null));
+  const card = document.createElement("div");
+  card.className = "card stack";
+  card.innerHTML = `
+    <button id="m-ubic" style="width:100%">Contar por ubicación</button>
+    <button id="m-recuentos" class="secondary" style="width:100%">Recuentos pendientes</button>
+    <button id="m-diferidas" class="secondary" style="width:100%">Diferidas</button>
+    ${S.usuario.rol === "supervisor" ? `<button id="m-sup" class="secondary" style="width:100%">Tablero supervisor</button>` : ""}
+    <button id="m-salir" class="ghost" style="width:100%">Cambiar de sesión / salir</button>
+  `;
+  el.appendChild(card);
+  card.querySelector("#m-ubic").onclick = ()=>{ S.pantalla="ubicaciones"; render(); cargarUbicaciones(); };
+  card.querySelector("#m-recuentos").onclick = ()=>{ S.pantalla="recuentos"; render(); cargarRecuentos(); };
+  card.querySelector("#m-diferidas").onclick = ()=>{ S.pantalla="diferidas"; render(); cargarDiferidas(); };
+  const sup = card.querySelector("#m-sup");
+  if(sup) sup.onclick = ()=>{ S.pantalla="supervisor"; render(); cargarSupervisor(); };
+  card.querySelector("#m-salir").onclick = ()=>{
+    S.sesion = null; S.pantalla = "sesiones"; guardarSesionLocal(); render(); cargarSesionesAbiertas();
+  };
+  return el;
+}
+
+/* ---------------------------- UBICACIONES --------------------------------- */
+let _ubicaciones = null;
+async function cargarUbicaciones(){
+  try{
+    _ubicaciones = await rpc("app_mis_ubicaciones", {p_sesion: S.sesion.sesion_id, p_usuario: S.usuario.usuario_id});
+  }catch(e){ toast("Error: " + e.message); _ubicaciones = []; }
+  if(S.pantalla === "ubicaciones") render();
+}
+function viewUbicaciones(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Mis ubicaciones", ()=>{ S.pantalla="menu"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  if(_ubicaciones === null){
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else if(_ubicaciones.length === 0){
+    card.innerHTML = `<div class="empty">No tienes ubicaciones asignadas en esta sesión.</div>`;
+  } else {
+    _ubicaciones.forEach(u=>{
+      const pend = u.lineas - u.contadas;
+      const item = document.createElement("div");
+      item.className = "list-item";
+      item.style.cursor = "pointer";
+      item.innerHTML = `
+        <div>
+          <div style="font-weight:600">${u.ubicacion}</div>
+          <div class="muted" style="font-size:12px">Zona ${u.zona} · ${u.contadas}/${u.lineas} líneas</div>
+        </div>
+        ${pend > 0 ? `<span class="badge-count">${pend}</span>` : `<span class="pill pill-ok">Lista</span>`}
+      `;
+      item.onclick = ()=>{ S.ubicActual = u; S.pantalla = "lineas"; render(); cargarLineas(u.ubicacion); };
+      card.appendChild(item);
+    });
+  }
+  el.appendChild(card);
+  return el;
+}
+
+/* ------------------------------- LÍNEAS ------------------------------------ */
+async function cargarLineas(ubicacion){
+  try{
+    S.lineasUbicacion = await rpc("app_lineas_ubicacion", {p_sesion: S.sesion.sesion_id, p_ubicacion: ubicacion});
+  }catch(e){ toast("Error: " + e.message); S.lineasUbicacion = []; }
+  if(S.pantalla === "lineas") render();
+}
+function pillAbc(c){
+  const cls = c === "A" ? "pill-a" : c === "B" ? "pill-b" : "pill-c";
+  return `<span class="pill ${cls}">${c}</span>`;
+}
+function pillEstado(e){
+  const map = {
+    pendiente: ["Sin contar", "muted"],
+    aceptada: ["Aceptada", "pill-ok"],
+    confirmada: ["Confirmada", "pill-ok"],
+    descartada: ["Descartada (error 1er conteo)", "pill-ok"],
+    verificacion: ["Esperando recuento", "pill-warn"],
+    verif3: ["Esperando 3er conteo", "pill-warn"],
+    arbitraje: ["Con el supervisor", "pill-bad"],
+    ajustada: ["Resuelta por supervisor", "pill-ok"],
+    diferida: ["Diferida", "pill-warn"],
+    resuelta: ["Diferida — resuelta", "pill-ok"],
+  };
+  const [txt, cls] = map[e] || [e, "muted"];
+  return cls === "muted" ? `<span class="muted">${txt}</span>` : `<span class="pill ${cls}">${txt}</span>`;
+}
+function viewLineas(){
+  const el = document.createElement("div");
+  el.appendChild(topbar(S.ubicActual.ubicacion, ()=>{ S.pantalla="ubicaciones"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  if(!S.lineasUbicacion.length){
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else {
+    S.lineasUbicacion.forEach(l=>{
+      const item = document.createElement("div");
+      item.className = "list-item";
+      item.style.cursor = "pointer";
+      item.innerHTML = `
+        <div>
+          <div style="font-weight:600">${l.sku} ${l.empresa && l.empresa !== "UNICA" ? `<span class="pill pill-c">${l.empresa}</span>` : ""}</div>
+          <div class="muted" style="font-size:12px">${l.producto || ""}</div>
+          <div style="margin-top:4px">${pillAbc(l.clase_abc)} ${pillEstado(l.estado)}
+            ${l.compartida ? `<span class="pill pill-warn" title="también hay stock de otra empresa en esta posición">compartida</span>` : ""}
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="muted" style="font-size:12px">teórico</div>
+          <div style="font-weight:700">${fmt(l.esperado)}</div>
+        </div>
+      `;
+      if(l.estado === "pendiente"){
+        item.onclick = ()=>{ S.lineaActual = l; S.pantalla = "contar"; render(); };
+      } else {
+        item.style.cursor = "default";
+      }
+      card.appendChild(item);
+    });
+  }
+  el.appendChild(card);
+  return el;
+}
+
+/* -------------------------------- CONTAR ----------------------------------- */
+function viewContar(){
+  const l = S.lineaActual;
+  const el = document.createElement("div");
+  el.appendChild(topbar("Contar", ()=>{ S.pantalla="lineas"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <h2>${l.sku} ${l.empresa && l.empresa !== "UNICA" ? `<span class="pill pill-c">${l.empresa}</span>` : ""}</h2>
+    <div class="muted">${l.producto || ""}</div>
+    <div style="margin:10px 0">${pillAbc(l.clase_abc)}</div>
+    <div class="row" style="background:var(--info-bg);border-radius:10px;padding:10px 12px">
+      <span class="muted">Stock teórico (esperado)</span>
+      <span style="font-weight:700;font-size:18px">${fmt(l.esperado)}</span>
+    </div>
+    ${(l.salidas && l.salidas.length) ? `
+      <div style="margin-top:8px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Salidas recientes (puede explicar un sobrante)</div>
+        ${l.salidas.map(s=>`<div class="salida-chip"><span>${s.referencia || "—"} · ${fmtFecha(s.ocurrido_en)}</span><span>${fmt(s.cantidad)}</span></div>`).join("")}
+      </div>` : ""}
+    <div class="num-row">
+      <button id="menos" class="secondary">−</button>
+      <input id="cantidad" type="number" inputmode="decimal" step="any">
+      <button id="mas" class="secondary">+</button>
+    </div>
+    <button id="btn-guardar" style="width:100%">Guardar conteo</button>
+  `;
+  el.appendChild(card);
+  const input = card.querySelector("#cantidad");
+  card.querySelector("#menos").onclick = ()=>{ input.value = Math.max(0, (parseFloat(input.value)||0) - 1); };
+  card.querySelector("#mas").onclick = ()=>{ input.value = (parseFloat(input.value)||0) + 1; };
+  card.querySelector("#btn-guardar").onclick = async ()=>{
+    const val = input.value.trim();
+    if(val === "" || isNaN(parseFloat(val))){ toast("Ingresa una cantidad."); return; }
+    const btn = card.querySelector("#btn-guardar");
+    btn.disabled = true; btn.textContent = "Guardando…";
+    const idem = `web-${l.linea_id}-${Date.now()}`;
+    try{
+      const res = await rpc("app_registrar_conteo", {
+        p_linea: l.linea_id, p_usuario: S.usuario.usuario_id,
+        p_cantidad: parseFloat(val), p_idem: idem,
+      });
+      const r = res && res[0];
+      if(r && r.requiere_recuento){
+        toast("Guardado. Diferencia fuera de tolerancia: queda para recuento a ciegas.");
+      } else {
+        toast("Conteo guardado.");
+      }
+      S.pantalla = "lineas"; render(); cargarLineas(S.ubicActual.ubicacion);
+    }catch(e){
+      toast("Error: " + e.message);
+      btn.disabled = false; btn.textContent = "Guardar conteo";
+    }
+  };
+  input.focus();
+  return el;
+}
+
+/* ------------------------------ RECUENTOS (CIEGO) --------------------------- */
+let _recuentos = null;
+async function cargarRecuentos(){
+  try{
+    _recuentos = await rpc("app_cola_recuentos", {p_sesion: S.sesion.sesion_id, p_usuario: S.usuario.usuario_id});
+  }catch(e){ toast("Error: " + e.message); _recuentos = []; }
+  if(S.pantalla === "recuentos") render();
+}
+function viewRecuentos(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Recuentos (a ciegas)", ()=>{ S.pantalla="menu"; render(); }));
+  const info = document.createElement("div");
+  info.className = "card";
+  info.innerHTML = `<div class="muted" style="font-size:13px">No ves el stock teórico ni el conteo anterior: cuenta lo que ves físicamente.</div>`;
+  el.appendChild(info);
+  const card = document.createElement("div");
+  card.className = "card";
+  if(_recuentos === null){
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else if(_recuentos.length === 0){
+    card.innerHTML = `<div class="empty">No tienes recuentos pendientes.</div>`;
+  } else {
+    _recuentos.forEach(r=>{
+      const item = document.createElement("div");
+      item.className = "list-item";
+      item.style.cursor = "pointer";
+      item.innerHTML = `
+        <div>
+          <div style="font-weight:600">${r.sku}</div>
+          <div class="muted" style="font-size:12px">${r.ubicacion} ${r.producto ? "· " + r.producto : ""}</div>
+          ${r.es_auditoria ? `<span class="pill pill-c">auditoría</span>` : ""}
+          ${r.misma_zona ? `<span class="pill pill-ok">tu zona</span>` : ""}
+        </div>
+        <span class="muted">&rsaquo;</span>`;
+      item.onclick = ()=>{
+        S.lineaActual = {linea_id: r.linea_id, sku: r.sku, producto: r.producto,
+                         clase_abc: "", esperado: null, salidas: [], empresa: null};
+        S.ubicActual = {ubicacion: r.ubicacion};
+        S.pantalla = "contar-ciego";
+        renderContarCiego();
+      };
+      card.appendChild(item);
+    });
+  }
+  el.appendChild(card);
+  return el;
+}
+function renderContarCiego(){
+  const l = S.lineaActual;
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  app.appendChild(topbar("Recuento", ()=>{ S.pantalla="recuentos"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <h2>${l.sku}</h2>
+    <div class="muted">${l.producto || ""} · ${S.ubicActual.ubicacion}</div>
+    <div class="muted" style="margin-top:10px;font-size:13px">Cuenta a ciegas: no se muestra el teórico ni el conteo anterior.</div>
+    <div class="num-row">
+      <button id="menos" class="secondary">−</button>
+      <input id="cantidad" type="number" inputmode="decimal" step="any">
+      <button id="mas" class="secondary">+</button>
+    </div>
+    <button id="btn-guardar" style="width:100%">Guardar recuento</button>
+  `;
+  app.appendChild(card);
+  const input = card.querySelector("#cantidad");
+  card.querySelector("#menos").onclick = ()=>{ input.value = Math.max(0, (parseFloat(input.value)||0) - 1); };
+  card.querySelector("#mas").onclick = ()=>{ input.value = (parseFloat(input.value)||0) + 1; };
+  card.querySelector("#btn-guardar").onclick = async ()=>{
+    const val = input.value.trim();
+    if(val === "" || isNaN(parseFloat(val))){ toast("Ingresa una cantidad."); return; }
+    const btn = card.querySelector("#btn-guardar");
+    btn.disabled = true; btn.textContent = "Guardando…";
+    const idem = `web-${l.linea_id}-${Date.now()}`;
+    try{
+      const res = await rpc("app_registrar_conteo", {
+        p_linea: l.linea_id, p_usuario: S.usuario.usuario_id,
+        p_cantidad: parseFloat(val), p_idem: idem,
+      });
+      const r = res && res[0];
+      toast(r && r.estado ? `Resultado: ${r.estado}` : "Recuento guardado.");
+      S.pantalla = "recuentos"; render(); cargarRecuentos();
+    }catch(e){
+      toast("Error: " + e.message);
+      btn.disabled = false; btn.textContent = "Guardar recuento";
+    }
+  };
+  input.focus();
+}
+
+/* -------------------------------- DIFERIDAS --------------------------------- */
+let _diferidas = null;
+async function cargarDiferidas(){
+  try{
+    _diferidas = await rpc("app_cola_diferidas", {p_sesion: S.sesion.sesion_id, p_usuario: S.usuario.usuario_id});
+  }catch(e){ toast("Error: " + e.message); _diferidas = []; }
+  if(S.pantalla === "diferidas") render();
+}
+function viewDiferidas(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Diferidas", ()=>{ S.pantalla="menu"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  if(_diferidas === null){
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else if(_diferidas.length === 0){
+    card.innerHTML = `<div class="empty">No hay diferidas pendientes.</div>`;
+  } else {
+    _diferidas.forEach(d=>{
+      const item = document.createElement("div");
+      item.className = "card";
+      item.style.marginBottom = "10px";
+      item.innerHTML = `
+        <div class="row">
+          <div>
+            <div style="font-weight:600">${d.sku}</div>
+            <div class="muted" style="font-size:12px">${d.ubicacion}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted" style="font-size:12px">diferencia</div>
+            <div style="font-weight:700;color:${d.diferencia>=0?'var(--ok)':'var(--bad)'}">${d.diferencia>0?'+':''}${fmt(d.diferencia)}</div>
+          </div>
+        </div>
+        ${d.operador ? `<div class="muted" style="font-size:12px;margin-top:6px">Consultado a: ${d.operador}</div>` : ""}
+        ${d.mia ? `<div class="pill pill-c" style="margin-top:6px">tú la diferiste</div>` : ""}
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button class="secondary" data-ok="0" style="flex:1">Aún no recolectado</button>
+          <button data-ok="1" style="flex:1">Ya recolectado</button>
+        </div>
+      `;
+      item.querySelectorAll("button[data-ok]").forEach(b=>{
+        b.onclick = async ()=>{
+          const recolectado = b.dataset.ok === "1";
+          try{
+            const res = await rpc("app_resolver_diferida", {
+              p_linea: d.linea_id, p_usuario: S.usuario.usuario_id, p_recolectado: recolectado,
+            });
+            toast(recolectado ? "Resuelta: cuadra con el sistema." : "Vuelve a recuento a ciegas.");
+            cargarDiferidas();
+          }catch(e){ toast("Error: " + e.message); }
+        };
+      });
+      card.appendChild(item);
+    });
+  }
+  el.appendChild(card);
+  return el;
+}
+
+/* ------------------------------- SUPERVISOR ---------------------------------- */
+let _kpis = null;
+async function cargarSupervisor(){
+  try{
+    _kpis = await rpc("app_kpis", {p_sesion: S.sesion.sesion_id});
+  }catch(e){ toast("Error: " + e.message); _kpis = []; }
+  if(S.pantalla === "supervisor") render();
+}
+function viewSupervisor(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Tablero", ()=>{ S.pantalla="menu"; render(); }));
+  const card = document.createElement("div");
+  card.className = "card";
+  if(_kpis === null){
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else if(!_kpis.length){
+    card.innerHTML = `<div class="empty">Sin datos todavía.</div>`;
+  } else {
+    const k = _kpis[0];
+    const pares = [
+      ["Líneas", k.lineas], ["Contadas", k.contadas], ["Cerradas", k.cerradas],
+      ["Recuentos pendientes", k.recuentos_pendientes], ["Diferidas", k.diferidas],
+      ["Excepciones", k.excepciones], ["ERI %", k.eri],
+      ["Diferencia bruta", fmtMoney(k.dif_bruta)], ["Diferencia neta", fmtMoney(k.dif_neta)],
+      ["Confiabilidad %", k.confiabilidad],
+    ];
+    card.innerHTML = `<h3>Indicadores</h3>` + pares.map(([t,v])=>`
+      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <span class="muted">${t}</span><span style="font-weight:700">${v ?? "—"}</span>
+      </div>`).join("");
+  }
+  el.appendChild(card);
+  if(_kpis && _kpis.length){
+    const btnCerrar = document.createElement("button");
+    btnCerrar.textContent = "Cerrar sesión de inventario";
+    btnCerrar.style.width = "100%";
+    btnCerrar.onclick = async ()=>{
+      if(!confirm("¿Cerrar la sesión de inventario? Debe estar todo contado y verificado.")) return;
+      try{
+        const res = await rpc("app_cerrar_sesion", {p_sesion: S.sesion.sesion_id, p_supervisor: S.usuario.usuario_id});
+        const r = res && res[0];
+        toast(r ? r.mensaje : "Listo.");
+        if(r && r.cerrada){ S.sesion = null; S.pantalla = "sesiones"; guardarSesionLocal(); render(); cargarSesionesAbiertas(); }
+      }catch(e){ toast("Error: " + e.message); }
+    };
+    el.appendChild(btnCerrar);
+  }
+  return el;
+}
+
+/* --------------------------------- arranque --------------------------------- */
+cargarSesionLocal();
+render();
+if(S.pantalla === "menu"){ /* nada extra por ahora */ }
+</script>
+</body>
+</html>
