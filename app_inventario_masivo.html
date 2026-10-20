@@ -336,9 +336,37 @@ function viewSesiones(){
 }
 
 /* -------------------------------- MENÚ ------------------------------------ */
+function minutosDesde(iso){
+  if(!iso) return null;
+  return Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+}
+function pillSync(min){
+  if(min === null) return `<span class="pill pill-bad">Nunca sincronizado</span>`;
+  if(min < 30) return `<span class="pill pill-ok">Sync hace ${min} min</span>`;
+  if(min < 120) return `<span class="pill pill-warn">Sync hace ${min} min</span>`;
+  const h = Math.round(min/60);
+  return `<span class="pill pill-bad">Sin sincronizar hace ${h} h</span>`;
+}
 function viewMenu(){
   const el = document.createElement("div");
   el.appendChild(topbar("Menú", null));
+
+  const syncCard = document.createElement("div");
+  syncCard.className = "card row";
+  syncCard.id = "sync-card";
+  syncCard.innerHTML = `<span class="muted">Movimientos de Odoo</span><span id="sync-pill">
+    <span class="spinner"></span></span>`;
+  el.appendChild(syncCard);
+  rpc("app_estado_sync", {p_sesion: S.sesion.sesion_id}).then(res=>{
+    const r = res && res[0];
+    const min = r ? minutosDesde(r.ultima_sync) : null;
+    const pill = document.getElementById("sync-pill");
+    if(pill) pill.innerHTML = pillSync(min);
+  }).catch(()=>{
+    const pill = document.getElementById("sync-pill");
+    if(pill) pill.innerHTML = `<span class="muted">—</span>`;
+  });
+
   const card = document.createElement("div");
   card.className = "card stack";
   card.innerHTML = `
@@ -375,6 +403,7 @@ function zonaCorta(nombre){
   return `${partes[0]} (+${partes.length - 1} zonas más en tu sector)`;
 }
 let _filtroUbic = "";
+let _contUbic = null;
 function viewUbicaciones(){
   const el = document.createElement("div");
   el.appendChild(topbar("Mis ubicaciones", ()=>{ S.pantalla="menu"; render(); }));
@@ -387,12 +416,13 @@ function viewUbicaciones(){
   const inputFiltro = buscador.querySelector("#filtro-ubic");
   inputFiltro.oninput = ()=>{ _filtroUbic = inputFiltro.value; renderListaUbicaciones(); };
 
-  el.appendChild(document.createElement("div")).id = "lista-ubicaciones";
+  _contUbic = document.createElement("div");
+  el.appendChild(_contUbic);
   renderListaUbicaciones();
   return el;
 }
 function renderListaUbicaciones(){
-  const cont = document.getElementById("lista-ubicaciones");
+  const cont = _contUbic;
   if(!cont) return;
   cont.innerHTML = "";
 
