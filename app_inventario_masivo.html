@@ -368,9 +368,20 @@ async function cargarUbicaciones(){
   }catch(e){ toast("Error: " + e.message); _ubicaciones = []; }
   if(S.pantalla === "ubicaciones") render();
 }
+function zonaCorta(nombre){
+  if(!nombre) return "";
+  const partes = nombre.split(" + ");
+  if(partes.length <= 1) return nombre;
+  return `${partes[0]} (+${partes.length - 1} zonas más en tu sector)`;
+}
 function viewUbicaciones(){
   const el = document.createElement("div");
   el.appendChild(topbar("Mis ubicaciones", ()=>{ S.pantalla="menu"; render(); }));
+
+  // Agrupa por sector: casi siempre es uno solo, pero puede haber varios.
+  const sectores = {};
+  (_ubicaciones || []).forEach(u=>{ (sectores[u.zona] = sectores[u.zona] || []).push(u); });
+
   const card = document.createElement("div");
   card.className = "card";
   if(_ubicaciones === null){
@@ -378,7 +389,13 @@ function viewUbicaciones(){
   } else if(_ubicaciones.length === 0){
     card.innerHTML = `<div class="empty">No tienes ubicaciones asignadas en esta sesión.</div>`;
   } else {
-    _ubicaciones.forEach(u=>{
+    Object.keys(sectores).forEach(zona=>{
+      const head = document.createElement("div");
+      head.className = "muted";
+      head.style.cssText = "font-size:12px;font-weight:600;padding:10px 2px 4px";
+      head.textContent = "Sector: " + zonaCorta(zona);
+      card.appendChild(head);
+      sectores[zona].forEach(u=>{
       const pend = u.lineas - u.contadas;
       const item = document.createElement("div");
       item.className = "list-item";
@@ -386,12 +403,13 @@ function viewUbicaciones(){
       item.innerHTML = `
         <div>
           <div style="font-weight:600">${u.ubicacion}</div>
-          <div class="muted" style="font-size:12px">Zona ${u.zona} · ${u.contadas}/${u.lineas} líneas</div>
+          <div class="muted" style="font-size:12px">${u.contadas}/${u.lineas} líneas</div>
         </div>
         ${pend > 0 ? `<span class="badge-count">${pend}</span>` : `<span class="pill pill-ok">Lista</span>`}
       `;
       item.onclick = ()=>{ S.ubicActual = u; S.pantalla = "lineas"; render(); cargarLineas(u.ubicacion); };
       card.appendChild(item);
+      });
     });
   }
   el.appendChild(card);
