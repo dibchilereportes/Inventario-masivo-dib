@@ -374,20 +374,44 @@ function zonaCorta(nombre){
   if(partes.length <= 1) return nombre;
   return `${partes[0]} (+${partes.length - 1} zonas más en tu sector)`;
 }
+let _filtroUbic = "";
 function viewUbicaciones(){
   const el = document.createElement("div");
   el.appendChild(topbar("Mis ubicaciones", ()=>{ S.pantalla="menu"; render(); }));
 
+  const buscador = document.createElement("div");
+  buscador.className = "card";
+  buscador.style.padding = "10px 12px";
+  buscador.innerHTML = `<input id="filtro-ubic" placeholder="Buscar ubicación…" value="${_filtroUbic.replace(/"/g,'&quot;')}">`;
+  el.appendChild(buscador);
+  const inputFiltro = buscador.querySelector("#filtro-ubic");
+  inputFiltro.oninput = ()=>{ _filtroUbic = inputFiltro.value; renderListaUbicaciones(); };
+
+  el.appendChild(document.createElement("div")).id = "lista-ubicaciones";
+  renderListaUbicaciones();
+  return el;
+}
+function renderListaUbicaciones(){
+  const cont = document.getElementById("lista-ubicaciones");
+  if(!cont) return;
+  cont.innerHTML = "";
+
+  const filtro = _filtroUbic.trim().toLowerCase();
+  const todas = _ubicaciones || [];
+  const filtradas = filtro ? todas.filter(u => u.ubicacion.toLowerCase().includes(filtro)) : todas;
+
   // Agrupa por sector: casi siempre es uno solo, pero puede haber varios.
   const sectores = {};
-  (_ubicaciones || []).forEach(u=>{ (sectores[u.zona] = sectores[u.zona] || []).push(u); });
+  filtradas.forEach(u=>{ (sectores[u.zona] = sectores[u.zona] || []).push(u); });
 
   const card = document.createElement("div");
   card.className = "card";
   if(_ubicaciones === null){
     card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
-  } else if(_ubicaciones.length === 0){
+  } else if(todas.length === 0){
     card.innerHTML = `<div class="empty">No tienes ubicaciones asignadas en esta sesión.</div>`;
+  } else if(filtradas.length === 0){
+    card.innerHTML = `<div class="empty">Sin resultados para "${_filtroUbic}".</div>`;
   } else {
     Object.keys(sectores).forEach(zona=>{
       const head = document.createElement("div");
@@ -412,8 +436,7 @@ function viewUbicaciones(){
       });
     });
   }
-  el.appendChild(card);
-  return el;
+  cont.appendChild(card);
 }
 
 /* ------------------------------- LÍNEAS ------------------------------------ */
@@ -477,7 +500,37 @@ function viewLineas(){
     });
   }
   el.appendChild(card);
+
+  const btnAgregar = document.createElement("button");
+  btnAgregar.className = "secondary";
+  btnAgregar.style.width = "100%";
+  btnAgregar.textContent = "+ Producto encontrado (no está en la lista)";
+  btnAgregar.onclick = ()=> abrirAgregarProducto();
+  el.appendChild(btnAgregar);
   return el;
+}
+
+function abrirAgregarProducto(){
+  const sku = prompt("SKU del producto encontrado en esta ubicación:");
+  if(!sku || !sku.trim()) return;
+  let empresa = null;
+  if(S.sesion.bodegas && S.sesion.bodegas.length > 1){
+    empresa = prompt("¿De qué empresa es? (DIB / DECOSTORE / DECOEXPRESS)");
+    if(!empresa || !empresa.trim()) return;
+    empresa = empresa.trim().toUpperCase();
+  }
+  (async ()=>{
+    try{
+      const res = await rpc("app_agregar_linea", {
+        p_sesion: S.sesion.sesion_id, p_ubicacion: S.ubicActual.ubicacion,
+        p_sku: sku.trim().toUpperCase(), p_usuario: S.usuario.usuario_id,
+        p_empresa: empresa,
+      });
+      const r = res && res[0];
+      toast(r && r.ya_existia ? "Ese SKU ya estaba en la lista." : "Agregado. Ya puedes contarlo.");
+      cargarLineas(S.ubicActual.ubicacion);
+    }catch(e){ toast("Error: " + e.message); }
+  })();
 }
 
 /* -------------------------------- CONTAR ----------------------------------- */
