@@ -524,8 +524,10 @@ function viewLineas(){
             <div class="muted" style="font-size:12px">teórico</div>
             <div style="font-weight:700">${fmt(l.esperado)}</div>
             ${l.estado !== "pendiente" ? `
-              <div class="muted" style="font-size:12px;margin-top:6px">contaste</div>
-              <div style="font-weight:700">${fmt(l.contado)}</div>` : ""}
+              <div class="muted" style="font-size:12px;margin-top:6px">total actual</div>
+              <div style="font-weight:700">${fmt(l.final_qty ?? l.contado)}</div>
+              ${(l.final_qty !== null && l.final_qty !== l.contado) ? `
+                <div class="muted" style="font-size:11px">1er conteo: ${fmt(l.contado)}</div>` : ""}` : ""}
           </div>
         </div>
       `;
