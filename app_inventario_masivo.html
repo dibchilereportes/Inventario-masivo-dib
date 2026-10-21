@@ -498,7 +498,9 @@ function pillEstado(e){
 }
 function viewLineas(){
   const el = document.createElement("div");
-  el.appendChild(topbar(S.ubicActual.ubicacion, ()=>{ S.pantalla="ubicaciones"; render(); }));
+  el.appendChild(topbar(S.ubicActual.ubicacion, ()=>{
+    S.pantalla="ubicaciones"; render(); cargarUbicaciones();
+  }));
   const card = document.createElement("div");
   card.className = "card";
   if(!S.lineasUbicacion.length){
@@ -506,25 +508,61 @@ function viewLineas(){
   } else {
     S.lineasUbicacion.forEach(l=>{
       const item = document.createElement("div");
-      item.className = "list-item";
-      item.style.cursor = "pointer";
+      item.className = (l.estado === "pendiente") ? "list-item" : "card";
+      if(l.estado === "pendiente") item.style.cursor = "pointer";
+      const cerrada = l.estado !== "pendiente" && l.estado !== "verificacion" && l.estado !== "verif3";
       item.innerHTML = `
-        <div>
-          <div style="font-weight:600">${l.sku} ${l.empresa && l.empresa !== "UNICA" ? `<span class="pill pill-c">${l.empresa}</span>` : ""}</div>
-          <div class="muted" style="font-size:12px">${l.producto || ""}</div>
-          <div style="margin-top:4px">${pillAbc(l.clase_abc)} ${pillEstado(l.estado)}
-            ${l.compartida ? `<span class="pill pill-warn" title="también hay stock de otra empresa en esta posición">compartida</span>` : ""}
+        <div class="row" style="align-items:flex-start">
+          <div>
+            <div style="font-weight:600">${l.sku} ${l.empresa && l.empresa !== "UNICA" ? `<span class="pill pill-c">${l.empresa}</span>` : ""}</div>
+            <div class="muted" style="font-size:12px">${l.producto || ""}</div>
+            <div style="margin-top:4px">${pillAbc(l.clase_abc)} ${pillEstado(l.estado)}
+              ${l.compartida ? `<span class="pill pill-warn" title="también hay stock de otra empresa en esta posición">compartida</span>` : ""}
+            </div>
           </div>
-        </div>
-        <div style="text-align:right">
-          <div class="muted" style="font-size:12px">teórico</div>
-          <div style="font-weight:700">${fmt(l.esperado)}</div>
+          <div style="text-align:right">
+            <div class="muted" style="font-size:12px">teórico</div>
+            <div style="font-weight:700">${fmt(l.esperado)}</div>
+            ${l.estado !== "pendiente" ? `
+              <div class="muted" style="font-size:12px;margin-top:6px">contaste</div>
+              <div style="font-weight:700">${fmt(l.contado)}</div>` : ""}
+          </div>
         </div>
       `;
       if(l.estado === "pendiente"){
         item.onclick = ()=>{ S.lineaActual = l; S.pantalla = "contar"; render(); };
-      } else {
-        item.style.cursor = "default";
+      } else if(cerrada){
+        const acciones = document.createElement("div");
+        acciones.className = "row";
+        acciones.style.cssText = "margin-top:10px;gap:8px";
+        acciones.innerHTML = `
+          <button class="secondary" style="flex:1">+ Complementar</button>
+          <button class="ghost" style="flex:1">Recontar yo mismo</button>
+        `;
+        const [btnComp, btnRe] = acciones.querySelectorAll("button");
+        btnComp.onclick = ()=>{
+          const extra = prompt(`¿Cuántas unidades MÁS de ${l.sku} encontraste? (ya tenías ${fmt(l.final_qty ?? l.contado)})`);
+          if(extra === null || extra.trim() === "" || isNaN(parseFloat(extra))) return;
+          rpc("app_complementar_conteo", {
+            p_linea: l.linea_id, p_usuario: S.usuario.usuario_id, p_cantidad_adicional: parseFloat(extra),
+          }).then(res=>{
+            const r = res && res[0];
+            toast(`Complementado. Nuevo total: ${fmt(r && r.final_qty)}`);
+            cargarLineas(S.ubicActual.ubicacion);
+          }).catch(e=> toast("Error: " + e.message));
+        };
+        btnRe.onclick = ()=>{
+          const val = prompt(`Vuelve a contar ${l.sku} completo (reemplaza el ${fmt(l.final_qty ?? l.contado)} anterior):`);
+          if(val === null || val.trim() === "" || isNaN(parseFloat(val))) return;
+          rpc("app_recontar_propio", {
+            p_linea: l.linea_id, p_usuario: S.usuario.usuario_id, p_cantidad: parseFloat(val),
+          }).then(res=>{
+            const r = res && res[0];
+            toast(`Recontado. Nuevo total: ${fmt(r && r.final_qty)}`);
+            cargarLineas(S.ubicActual.ubicacion);
+          }).catch(e=> toast("Error: " + e.message));
+        };
+        item.appendChild(acciones);
       }
       card.appendChild(item);
     });
@@ -541,8 +579,70 @@ function viewLineas(){
 }
 
 function abrirAgregarProducto(){
-  const sku = prompt("SKU del producto encontrado en esta ubicación:");
-  if(!sku || !sku.trim()) return;
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:flex;align-items:flex-end";
+  overlay.innerHTML = `
+    <div class="card" style="width:100%;margin:0;border-radius:16px 16px 0 0;max-height:80vh;overflow:auto">
+      <div class="row">
+        <h2 style="margin:0">Producto encontrado</h2>
+        <button class="ghost" id="ap-cerrar">✕</button>
+      </div>
+      <label>Escribe el SKU o nombre</label>
+      <input id="ap-buscar" placeholder="Ej: C661279 o lámpara…" autofocus>
+      <div id="ap-resultados" style="margin-top:8px"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#ap-cerrar").onclick = ()=> overlay.remove();
+  overlay.onclick = (e)=>{ if(e.target === overlay) overlay.remove(); };
+
+  const input = overlay.querySelector("#ap-buscar");
+  const resultados = overlay.querySelector("#ap-resultados");
+  let timer = null;
+
+  function elegir(sku, producto){
+    overlay.remove();
+    continuarAgregarProducto(sku, producto);
+  }
+
+  input.oninput = ()=>{
+    clearTimeout(timer);
+    const texto = input.value.trim();
+    if(texto.length < 2){
+      resultados.innerHTML = texto.length > 0
+        ? `<div class="muted" style="font-size:12px;padding:8px 2px">Sigue escribiendo…</div>` : "";
+      return;
+    }
+    resultados.innerHTML = `<div class="muted" style="font-size:12px;padding:8px 2px"><span class="spinner"></span> Buscando…</div>`;
+    timer = setTimeout(async ()=>{
+      try{
+        const res = await rpc("app_buscar_sku", {p_sesion: S.sesion.sesion_id, p_texto: texto});
+        resultados.innerHTML = "";
+        (res || []).forEach(p=>{
+          const item = document.createElement("div");
+          item.className = "list-item";
+          item.style.cursor = "pointer";
+          item.innerHTML = `<div><div style="font-weight:600">${p.sku}</div>
+            <div class="muted" style="font-size:12px">${p.producto || ""}</div></div>`;
+          item.onclick = ()=> elegir(p.sku, p.producto);
+          resultados.appendChild(item);
+        });
+        const libre = document.createElement("div");
+        libre.className = "list-item";
+        libre.style.cursor = "pointer";
+        libre.innerHTML = `<div class="muted">Usar "<b>${texto.toUpperCase()}</b>" tal cual (no está en la lista)</div>`;
+        libre.onclick = ()=> elegir(texto.toUpperCase(), null);
+        resultados.appendChild(libre);
+        if(!res || !res.length){
+          resultados.insertAdjacentHTML("afterbegin",
+            `<div class="muted" style="font-size:12px;padding:4px 2px">Sin coincidencias conocidas en esta sesión.</div>`);
+        }
+      }catch(e){ resultados.innerHTML = `<div class="muted">Error: ${e.message}</div>`; }
+    }, 300);
+  };
+}
+
+function continuarAgregarProducto(sku, producto){
   let empresa = null;
   if(S.sesion.bodegas && S.sesion.bodegas.length > 1){
     empresa = prompt("¿De qué empresa es? (DIB / DECOSTORE / DECOEXPRESS)");
@@ -553,7 +653,7 @@ function abrirAgregarProducto(){
     try{
       const res = await rpc("app_agregar_linea", {
         p_sesion: S.sesion.sesion_id, p_ubicacion: S.ubicActual.ubicacion,
-        p_sku: sku.trim().toUpperCase(), p_usuario: S.usuario.usuario_id,
+        p_sku: sku, p_usuario: S.usuario.usuario_id,
         p_empresa: empresa,
       });
       const r = res && res[0];
