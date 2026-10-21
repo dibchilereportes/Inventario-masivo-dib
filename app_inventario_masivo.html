@@ -219,6 +219,7 @@ function render(){
   else if(S.pantalla === "recuentos") app.appendChild(viewRecuentos());
   else if(S.pantalla === "diferidas") app.appendChild(viewDiferidas());
   else if(S.pantalla === "supervisor") app.appendChild(viewSupervisor());
+  else if(S.pantalla === "asignar") app.appendChild(viewAsignacion());
 }
 
 function topbar(titulo, onBack){
@@ -374,6 +375,7 @@ function viewMenu(){
     <button id="m-recuentos" class="secondary" style="width:100%">Recuentos pendientes</button>
     <button id="m-diferidas" class="secondary" style="width:100%">Diferidas</button>
     ${S.usuario.rol === "supervisor" ? `<button id="m-sup" class="secondary" style="width:100%">Tablero supervisor</button>` : ""}
+    ${S.usuario.rol === "supervisor" ? `<button id="m-asignar" class="secondary" style="width:100%">Asignar equipos</button>` : ""}
     <button id="m-salir" class="ghost" style="width:100%">Cambiar de sesión / salir</button>
   `;
   el.appendChild(card);
@@ -382,6 +384,8 @@ function viewMenu(){
   card.querySelector("#m-diferidas").onclick = ()=>{ S.pantalla="diferidas"; render(); cargarDiferidas(); };
   const sup = card.querySelector("#m-sup");
   if(sup) sup.onclick = ()=>{ S.pantalla="supervisor"; render(); cargarSupervisor(); };
+  const asig = card.querySelector("#m-asignar");
+  if(asig) asig.onclick = ()=>{ S.pantalla="asignar"; render(); cargarAsignacion(); };
   card.querySelector("#m-salir").onclick = ()=>{
     S.sesion = null; S.pantalla = "sesiones"; guardarSesionLocal(); render(); cargarSesionesAbiertas();
   };
@@ -920,6 +924,97 @@ function viewSupervisor(){
     };
     el.appendChild(btnCerrar);
   }
+  return el;
+}
+
+/* ------------------------------- ASIGNAR EQUIPOS ------------------------------ */
+let _sectores = null;
+let _usuariosDisp = null;
+async function cargarAsignacion(){
+  try{
+    const [sec, us] = await Promise.all([
+      rpc("app_sup_sectores", {p_sesion: S.sesion.sesion_id, p_supervisor: S.usuario.usuario_id}),
+      rpc("app_sup_usuarios", {p_supervisor: S.usuario.usuario_id}),
+    ]);
+    _sectores = sec; _usuariosDisp = us;
+  }catch(e){ toast("Error: " + e.message); _sectores = []; _usuariosDisp = []; }
+  if(S.pantalla === "asignar") render();
+}
+function viewAsignacion(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Asignar equipos", ()=>{ S.pantalla="menu"; render(); }));
+
+  if(_sectores === null){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+    el.appendChild(card);
+    return el;
+  }
+  if(!_sectores.length){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="empty">No hay sectores en esta sesión.</div>`;
+    el.appendChild(card);
+    return el;
+  }
+  const contadores = (_usuariosDisp || []).filter(u => u.rol === "contador");
+
+  _sectores.forEach(z=>{
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.marginBottom = "10px";
+    const asignados = z.asignados || [];
+    card.innerHTML = `
+      <div class="row">
+        <div style="font-weight:600">${z.nombre}</div>
+        <div class="muted" style="font-size:12px">${fmt(z.contadas)}/${fmt(z.lineas)} contadas</div>
+      </div>
+      <div class="chips" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+      <div class="row" style="margin-top:10px;gap:8px">
+        <select class="sel-usuario" style="flex:1"></select>
+        <button class="btn-agregar secondary">Agregar</button>
+      </div>
+    `;
+    const chipsBox = card.querySelector(".chips");
+    if(!asignados.length){
+      chipsBox.innerHTML = `<span class="muted" style="font-size:13px">Sin contadores asignados.</span>`;
+    } else {
+      asignados.forEach(a=>{
+        const chip = document.createElement("span");
+        chip.className = "pill pill-c";
+        chip.style.cursor = "pointer";
+        chip.textContent = a.nombre + " ✕";
+        chip.title = "Quitar";
+        chip.onclick = async ()=>{
+          try{
+            await rpc("app_sup_desasignar", {p_zona: z.zona_id, p_usuario: a.usuario_id, p_supervisor: S.usuario.usuario_id});
+            cargarAsignacion();
+          }catch(e){ toast("Error: " + e.message); }
+        };
+        chipsBox.appendChild(chip);
+      });
+    }
+    const sel = card.querySelector(".sel-usuario");
+    const yaAsignados = new Set(asignados.map(a=>a.usuario_id));
+    const disponibles = contadores.filter(u=>!yaAsignados.has(u.usuario_id));
+    if(!disponibles.length){
+      sel.innerHTML = `<option value="">(todos ya asignados)</option>`;
+      sel.disabled = true;
+      card.querySelector(".btn-agregar").disabled = true;
+    } else {
+      sel.innerHTML = disponibles.map(u=>`<option value="${u.usuario_id}">${u.nombre}</option>`).join("");
+    }
+    card.querySelector(".btn-agregar").onclick = async ()=>{
+      const uid = sel.value;
+      if(!uid) return;
+      try{
+        await rpc("app_sup_asignar", {p_zona: z.zona_id, p_usuario: uid, p_supervisor: S.usuario.usuario_id});
+        cargarAsignacion();
+      }catch(e){ toast("Error: " + e.message); }
+    };
+    el.appendChild(card);
+  });
   return el;
 }
 
