@@ -176,7 +176,7 @@ function fmtFecha(iso){
 const S = {
   usuario: null,       // {usuario_id, nombre, rol}
   sesion: null,        // {sesion_id, nombre, bodega, ...}
-  pantalla: "login",   // login | sesiones | menu | ubicaciones | lineas | contar | recuentos | diferidas | supervisor
+  pantalla: "login",   // login | sesiones | menu | ubicaciones | lineas | contar | recuentos | diferidas | supervisor | asignar | tolerancias
   ubicActual: null,
   lineaActual: null,
   lineasUbicacion: [],
@@ -220,6 +220,7 @@ function render(){
   else if(S.pantalla === "diferidas") app.appendChild(viewDiferidas());
   else if(S.pantalla === "supervisor") app.appendChild(viewSupervisor());
   else if(S.pantalla === "asignar") app.appendChild(viewAsignacion());
+  else if(S.pantalla === "tolerancias") app.appendChild(viewTolerancias());
 }
 
 function topbar(titulo, onBack){
@@ -376,6 +377,7 @@ function viewMenu(){
     <button id="m-diferidas" class="secondary" style="width:100%">Diferidas</button>
     ${S.usuario.rol === "supervisor" ? `<button id="m-sup" class="secondary" style="width:100%">Tablero supervisor</button>` : ""}
     ${S.usuario.rol === "supervisor" ? `<button id="m-asignar" class="secondary" style="width:100%">Asignar equipos</button>` : ""}
+    ${S.usuario.rol === "supervisor" ? `<button id="m-tol" class="secondary" style="width:100%">Tolerancias</button>` : ""}
     <button id="m-salir" class="ghost" style="width:100%">Cambiar de sesión / salir</button>
   `;
   el.appendChild(card);
@@ -386,6 +388,8 @@ function viewMenu(){
   if(sup) sup.onclick = ()=>{ S.pantalla="supervisor"; render(); cargarSupervisor(); };
   const asig = card.querySelector("#m-asignar");
   if(asig) asig.onclick = ()=>{ S.pantalla="asignar"; render(); cargarAsignacion(); };
+  const tol = card.querySelector("#m-tol");
+  if(tol) tol.onclick = ()=>{ S.pantalla="tolerancias"; render(); cargarTolerancias(); };
   card.querySelector("#m-salir").onclick = ()=>{
     S.sesion = null; S.pantalla = "sesiones"; guardarSesionLocal(); render(); cargarSesionesAbiertas();
   };
@@ -688,6 +692,11 @@ function viewContar(){
       <div style="margin-top:8px">
         <div class="muted" style="font-size:12px;margin-bottom:4px">Salidas recientes (puede explicar un sobrante)</div>
         ${l.salidas.map(s=>`<div class="salida-chip"><span>${s.referencia || "—"} · ${fmtFecha(s.ocurrido_en)}</span><span>${fmt(s.cantidad)}</span></div>`).join("")}
+      </div>` : ""}
+    ${(l.ciclico_qty && l.ciclico_qty !== 0) ? `
+      <div class="row" style="margin-top:8px;background:var(--warn-bg, #fff4e0);border-radius:10px;padding:10px 12px">
+        <span class="muted">Hay en CICLICO</span>
+        <span style="font-weight:700">${fmt(l.ciclico_qty)}</span>
       </div>` : ""}
     <div class="num-row">
       <button id="menos" class="secondary">−</button>
@@ -1011,6 +1020,73 @@ function viewAsignacion(){
       try{
         await rpc("app_sup_asignar", {p_zona: z.zona_id, p_usuario: uid, p_supervisor: S.usuario.usuario_id});
         cargarAsignacion();
+      }catch(e){ toast("Error: " + e.message); }
+    };
+    el.appendChild(card);
+  });
+  return el;
+}
+
+/* -------------------------------- TOLERANCIAS -------------------------------- */
+let _tolerancias = null;
+const NOMBRE_CLASE = {A: "Clase A (0% tolerancia)", B: "Clase B", C: "Clase C"};
+async function cargarTolerancias(){
+  try{
+    _tolerancias = await rpc("app_sup_tolerancias", {p_sesion: S.sesion.sesion_id, p_supervisor: S.usuario.usuario_id});
+  }catch(e){ toast("Error: " + e.message); _tolerancias = []; }
+  if(S.pantalla === "tolerancias") render();
+}
+function viewTolerancias(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Tolerancias", ()=>{ S.pantalla="menu"; render(); }));
+
+  const nota = document.createElement("div");
+  nota.className = "muted";
+  nota.style.cssText = "font-size:12px;margin-bottom:10px";
+  nota.textContent = "Una diferencia se acepta SIN recuento si está dentro de las unidades O del valor "
+    + "(lo que se cumpla primero). Esto aplica a los conteos que falten; lo ya contado no cambia.";
+  el.appendChild(nota);
+
+  if(_tolerancias === null){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+    el.appendChild(card);
+    return el;
+  }
+  const porClase = {};
+  (_tolerancias || []).forEach(t => porClase[t.clase_abc] = t);
+
+  ["A","B","C"].forEach(clase=>{
+    const t = porClase[clase] || {max_unidades: 0, max_valor: 0};
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.marginBottom = "10px";
+    card.innerHTML = `
+      <div style="font-weight:600;margin-bottom:8px">${NOMBRE_CLASE[clase]}</div>
+      <div class="row" style="gap:10px">
+        <div style="flex:1">
+          <label class="muted" style="font-size:12px">Máx. unidades</label>
+          <input class="in-unid" type="number" inputmode="decimal" step="any" min="0" value="${t.max_unidades}">
+        </div>
+        <div style="flex:1">
+          <label class="muted" style="font-size:12px">Máx. valor ($)</label>
+          <input class="in-valor" type="number" inputmode="decimal" step="any" min="0" value="${t.max_valor}">
+        </div>
+      </div>
+      <button class="btn-guardar secondary" style="width:100%;margin-top:10px">Guardar</button>
+    `;
+    card.querySelector(".btn-guardar").onclick = async ()=>{
+      const maxUnid = Number(card.querySelector(".in-unid").value || 0);
+      const maxValor = Number(card.querySelector(".in-valor").value || 0);
+      if(maxUnid < 0 || maxValor < 0){ toast("No puede ser negativo."); return; }
+      try{
+        await rpc("app_sup_set_tolerancia", {
+          p_sesion: S.sesion.sesion_id, p_clase: clase,
+          p_max_unidades: maxUnid, p_max_valor: maxValor,
+          p_supervisor: S.usuario.usuario_id});
+        toast("Guardado.");
+        cargarTolerancias();
       }catch(e){ toast("Error: " + e.message); }
     };
     el.appendChild(card);
