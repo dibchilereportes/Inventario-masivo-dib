@@ -179,7 +179,7 @@ const S = {
   pantalla: "login",   // login | sesiones | menu | ubicaciones | lineas | contar | recuentos | diferidas | supervisor | asignar | tolerancias | detalle
   ubicActual: null,
   lineaActual: null,
-  lineasUbicacion: [],
+  lineasUbicacion: null,
   cargando: false,
 };
 
@@ -425,6 +425,14 @@ function viewUbicaciones(){
   const inputFiltro = buscador.querySelector("#filtro-ubic");
   inputFiltro.oninput = ()=>{ _filtroUbic = inputFiltro.value; renderListaUbicaciones(); };
 
+  const btnNueva = document.createElement("button");
+  btnNueva.className = "secondary";
+  btnNueva.style.width = "100%";
+  btnNueva.style.marginTop = "8px";
+  btnNueva.textContent = "+ Ubicación no encontrada";
+  btnNueva.onclick = ()=> abrirUbicacionNueva();
+  el.appendChild(btnNueva);
+
   _contUbic = document.createElement("div");
   el.appendChild(_contUbic);
   renderListaUbicaciones();
@@ -478,8 +486,21 @@ function renderListaUbicaciones(){
   cont.appendChild(card);
 }
 
+function abrirUbicacionNueva(){
+  const ubic = prompt("Escribe el código de la ubicación tal como aparece en bodega (ej: DIB/A-12-03):");
+  if(!ubic || !ubic.trim()) return;
+  // Hereda el sector de alguna ubicación que el contador ya tenga, para que
+  // la línea que va a crear quede en su mismo sector (ver app_agregar_linea).
+  const ref = (_ubicaciones && _ubicaciones[0]) || null;
+  S.ubicActual = {ubicacion: ubic.trim().toUpperCase(), zona: ref ? ref.zona : "", lineas: 0, contadas: 0};
+  S.pantalla = "lineas"; render();
+  cargarLineas(S.ubicActual.ubicacion);
+}
+
 /* ------------------------------- LÍNEAS ------------------------------------ */
 async function cargarLineas(ubicacion){
+  S.lineasUbicacion = null;
+  if(S.pantalla === "lineas") render();
   try{
     S.lineasUbicacion = await rpc("app_lineas_ubicacion", {p_sesion: S.sesion.sesion_id, p_ubicacion: ubicacion});
   }catch(e){ toast("Error: " + e.message); S.lineasUbicacion = []; }
@@ -512,8 +533,10 @@ function viewLineas(){
   }));
   const card = document.createElement("div");
   card.className = "card";
-  if(!S.lineasUbicacion.length){
+  if(S.lineasUbicacion === null){
     card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+  } else if(!S.lineasUbicacion.length){
+    card.innerHTML = `<div class="empty">Aún no hay productos registrados en esta ubicación.<br>Usa el botón de abajo para agregar el primero.</div>`;
   } else {
     S.lineasUbicacion.forEach(l=>{
       const item = document.createElement("div");
@@ -1108,9 +1131,10 @@ function viewTolerancias(){
 /* --------------------------------- DETALLE (supervisor) --------------------- */
 let _detalle = null;
 let _zonasDetalle = null;
-let _filtroDetalle = {estado: "", zona: "", busqueda: ""};
+let _filtroDetalle = {estado: "_atencion", zona: "", busqueda: ""};
 const ESTADOS_DETALLE = [
-  ["", "Todos los estados"], ["pendiente", "Sin contar"], ["aceptada", "Aceptada"],
+  ["_atencion", "Necesita atención"], ["", "Todos los estados"],
+  ["pendiente", "Sin contar"], ["aceptada", "Aceptada"],
   ["verificacion", "Esperando recuento"], ["verif3", "Esperando 3er conteo"],
   ["confirmada", "Confirmada"], ["descartada", "Descartada"],
   ["arbitraje", "Con el supervisor"], ["ajustada", "Resuelta por supervisor"],
@@ -1141,10 +1165,8 @@ function viewDetalle(){
   filtros.style.marginBottom = "10px";
   filtros.innerHTML = `
     <input id="f-busca" placeholder="Buscar SKU, producto o ubicación…" value="${(_filtroDetalle.busqueda||"").replace(/"/g,'&quot;')}">
-    <div class="row" style="margin-top:8px;gap:8px">
-      <select id="f-estado" style="flex:1"></select>
-      <select id="f-zona" style="flex:1"></select>
-    </div>
+    <select id="f-estado" style="width:100%;margin-top:8px"></select>
+    <select id="f-zona" style="width:100%;margin-top:8px"></select>
   `;
   const selEstado = filtros.querySelector("#f-estado");
   selEstado.innerHTML = ESTADOS_DETALLE.map(([v,t])=>
@@ -1185,31 +1207,33 @@ function viewDetalle(){
   resumen.textContent = `${_detalle.length} línea(s)${_detalle.length === 300 ? " (mostrando las primeras 300 — afina el filtro)" : ""}`;
   el.appendChild(resumen);
 
+  const lista = document.createElement("div");
+  lista.className = "card";
+  lista.style.padding = "4px 12px";
   _detalle.forEach(l=>{
-    const card = document.createElement("div");
-    card.className = "card";
-    card.style.marginBottom = "8px";
-    card.innerHTML = `
-      <div class="row" style="align-items:flex-start">
-        <div>
-          <div style="font-weight:600">${l.sku} ${l.empresa && l.empresa !== "UNICA" ? `<span class="pill pill-c">${l.empresa}</span>` : ""}</div>
-          <div class="muted" style="font-size:12px">${l.producto || ""}</div>
-          <div class="muted" style="font-size:12px">${l.zona || "—"} · ${l.ubicacion}</div>
-          <div style="margin-top:4px">${pillAbc(l.clase_abc)} ${pillEstado(l.estado)}</div>
-          ${l.ultimo_contador ? `<div class="muted" style="font-size:11px;margin-top:2px">contó: ${l.ultimo_contador}</div>` : ""}
-        </div>
+    const fila = document.createElement("div");
+    fila.style.cssText = "padding:8px 0;border-bottom:1px solid var(--borde,#eee)";
+    fila.innerHTML = `
+      <div class="row" style="align-items:baseline">
+        <div style="font-weight:600;font-size:14px">${l.sku}${l.empresa && l.empresa !== "UNICA" ? ` <span class="pill pill-c">${l.empresa}</span>` : ""}</div>
+        ${pillEstado(l.estado)}
+      </div>
+      <div class="muted" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        ${l.producto || ""} · ${zonaCorta(l.zona) || "—"} · ${l.ubicacion}
+      </div>
+      <div class="row" style="margin-top:2px;font-size:12px">
+        <div>${pillAbc(l.clase_abc)}${l.ultimo_contador ? ` <span class="muted">contó: ${l.ultimo_contador}</span>` : ""}</div>
         <div style="text-align:right">
-          <div class="muted" style="font-size:12px">teórico / actual</div>
-          <div style="font-weight:700">${fmt(l.esperado)} / ${l.final_qty !== null ? fmt(l.final_qty) : "—"}</div>
-          ${(l.final_qty !== null && l.diferencia != 0) ? `
-            <div class="muted" style="font-size:11px">dif: ${fmt(l.diferencia)} (${fmtMoney(l.valor_diferencia)})</div>` : ""}
-          ${(l.ciclico_qty && l.ciclico_qty !== 0) ? `
-            <div class="muted" style="font-size:11px">CICLICO: ${fmt(l.ciclico_qty)}</div>` : ""}
+          <span class="muted">${fmt(l.esperado)} → ${l.final_qty !== null ? fmt(l.final_qty) : "—"}</span>
+          ${(l.final_qty !== null && l.diferencia != 0) ? ` <b>${l.diferencia > 0 ? "+" : ""}${fmt(l.diferencia)}</b> (${fmtMoney(l.valor_diferencia)})` : ""}
+          ${(l.ciclico_qty && l.ciclico_qty !== 0) ? ` <span class="muted">· CICLICO ${fmt(l.ciclico_qty)}</span>` : ""}
         </div>
       </div>
     `;
-    el.appendChild(card);
+    lista.appendChild(fila);
   });
+  lista.lastChild.style.borderBottom = "none";
+  el.appendChild(lista);
   return el;
 }
 
