@@ -411,6 +411,12 @@ function zonaCorta(nombre){
   if(partes.length <= 1) return nombre;
   return `${partes[0]} (+${partes.length - 1} zonas más en tu sector)`;
 }
+const EMPRESA_DE_BODEGA = {
+  "Bodega Central": "DIB", "DECOSTORE El Salto": "DECOSTORE", "Bodega 56": "DECOEXPRESS",
+};
+const PREFIJO_DE_EMPRESA = { DIB: "DIB/", DECOSTORE: "COMER/", DECOEXPRESS: "DECO/" };
+const SUB_UBICACION_OPCIONES = ["Stock", "QA", "Salida", "MERMA"];
+
 let _filtroUbic = "";
 let _contUbic = null;
 function viewUbicaciones(){
@@ -429,7 +435,7 @@ function viewUbicaciones(){
   btnNueva.className = "secondary";
   btnNueva.style.width = "100%";
   btnNueva.style.marginTop = "8px";
-  btnNueva.textContent = "+ Ubicación no encontrada";
+  btnNueva.textContent = "+ Agregar nueva ubicación";
   btnNueva.onclick = ()=> abrirUbicacionNueva();
   el.appendChild(btnNueva);
 
@@ -487,14 +493,141 @@ function renderListaUbicaciones(){
 }
 
 function abrirUbicacionNueva(){
-  const ubic = prompt("Escribe el código de la ubicación tal como aparece en bodega (ej: DIB/A-12-03):");
-  if(!ubic || !ubic.trim()) return;
-  // Hereda el sector de alguna ubicación que el contador ya tenga, para que
-  // la línea que va a crear quede en su mismo sector (ver app_agregar_linea).
-  const ref = (_ubicaciones && _ubicaciones[0]) || null;
-  S.ubicActual = {ubicacion: ubic.trim().toUpperCase(), zona: ref ? ref.zona : "", lineas: 0, contadas: 0};
-  S.pantalla = "lineas"; render();
-  cargarLineas(S.ubicActual.ubicacion);
+  const empresas = Array.from(new Set(
+    (S.sesion.bodegas || [S.sesion.bodega]).map(b => EMPRESA_DE_BODEGA[b]).filter(Boolean)
+  ));
+  let empresaSel = empresas.length === 1 ? empresas[0] : null;
+  let skuSel = null;
+
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:flex;align-items:flex-end";
+  overlay.innerHTML = `
+    <div class="card" style="width:100%;margin:0;border-radius:16px 16px 0 0;max-height:92vh;overflow:auto">
+      <div class="row">
+        <h2 style="margin:0">Nueva ubicación</h2>
+        <button class="ghost" id="un-cerrar">✕</button>
+      </div>
+
+      ${empresas.length > 1 ? `
+        <label>Empresa</label>
+        <div class="tabs" id="un-empresas">
+          ${empresas.map(e => `<div class="tab" data-emp="${e}">${e}</div>`).join("")}
+        </div>` : ""}
+
+      <label>Ubicación</label>
+      <div class="row" style="gap:8px;align-items:center">
+        <span class="pill pill-c" id="un-prefijo" style="flex:0 0 auto">${empresaSel ? PREFIJO_DE_EMPRESA[empresaSel] : "elige empresa"}</span>
+        <select id="un-sub" style="flex:1">
+          ${SUB_UBICACION_OPCIONES.map(s => `<option value="${s}" ${s === "Stock" ? "selected" : ""}>${s}/</option>`).join("")}
+          <option value="">(sin sub-ubicación)</option>
+          <option value="__otro__">Otra…</option>
+        </select>
+      </div>
+      <input id="un-sub-otro" placeholder="Escribe la sub-ubicación" style="display:none;margin-top:6px">
+      <input id="un-codigo" placeholder="Código final (ej: A010101)" style="margin-top:6px">
+
+      <label>SKU o nombre del producto</label>
+      <input id="un-buscar" placeholder="Escribe para buscar…">
+      <div id="un-resultados" style="min-height:40px;margin-top:4px"></div>
+
+      <label>Cantidad encontrada</label>
+      <input id="un-cantidad" type="number" inputmode="decimal" step="any" placeholder="0">
+
+      <button id="un-guardar" style="width:100%;margin-top:14px">Guardar</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#un-cerrar").onclick = ()=> overlay.remove();
+  overlay.onclick = (e)=>{ if(e.target === overlay) overlay.remove(); };
+
+  const prefijoEl = overlay.querySelector("#un-prefijo");
+  if(empresas.length > 1){
+    const tabs = overlay.querySelectorAll("#un-empresas .tab");
+    tabs.forEach(t=>{
+      t.onclick = ()=>{
+        empresaSel = t.dataset.emp;
+        tabs.forEach(x=> x.classList.toggle("active", x === t));
+        prefijoEl.textContent = PREFIJO_DE_EMPRESA[empresaSel];
+      };
+    });
+  }
+
+  const selSub = overlay.querySelector("#un-sub");
+  const inputSubOtro = overlay.querySelector("#un-sub-otro");
+  selSub.onchange = ()=>{
+    inputSubOtro.style.display = selSub.value === "__otro__" ? "" : "none";
+  };
+
+  const buscar = overlay.querySelector("#un-buscar");
+  const resultados = overlay.querySelector("#un-resultados");
+  let timer = null;
+  buscar.oninput = ()=>{
+    skuSel = null;
+    clearTimeout(timer);
+    const texto = buscar.value.trim();
+    if(texto.length < 2){ resultados.innerHTML = ""; return; }
+    timer = setTimeout(async ()=>{
+      try{
+        const res = await rpc("app_buscar_sku", {p_sesion: S.sesion.sesion_id, p_texto: texto});
+        resultados.innerHTML = "";
+        (res || []).slice(0, 6).forEach(p=>{
+          const item = document.createElement("div");
+          item.className = "list-item";
+          item.style.cursor = "pointer";
+          item.innerHTML = `<div><div style="font-weight:600">${p.sku}</div>
+            <div class="muted" style="font-size:12px">${p.producto || ""}</div></div>`;
+          item.onclick = ()=>{
+            skuSel = p.sku;
+            buscar.value = `${p.sku} — ${p.producto || ""}`;
+            resultados.innerHTML = "";
+          };
+          resultados.appendChild(item);
+        });
+        if(!res || !res.length){
+          resultados.innerHTML = `<div class="muted" style="font-size:12px;padding:4px 2px">Sin coincidencias conocidas. Se usará "${texto.toUpperCase()}" tal cual.</div>`;
+        }
+      }catch(e){ resultados.innerHTML = `<div class="muted">Error: ${e.message}</div>`; }
+    }, 300);
+  };
+
+  overlay.querySelector("#un-guardar").onclick = async ()=>{
+    if(empresas.length > 1 && !empresaSel){ toast("Elige la empresa."); return; }
+    const emp = empresaSel || empresas[0] || null;
+    const prefijo = emp ? PREFIJO_DE_EMPRESA[emp] : "";
+    const sub = selSub.value === "__otro__" ? inputSubOtro.value.trim() : selSub.value;
+    const codigo = overlay.querySelector("#un-codigo").value.trim().toUpperCase();
+    if(!codigo){ toast("Escribe el código de la ubicación."); return; }
+    const sku = skuSel || buscar.value.trim().toUpperCase();
+    if(!sku){ toast("Indica el SKU o producto."); return; }
+    const cantidadTxt = overlay.querySelector("#un-cantidad").value.trim();
+    const cantidad = parseFloat(cantidadTxt);
+    if(cantidadTxt === "" || isNaN(cantidad) || cantidad < 0){ toast("Indica la cantidad encontrada."); return; }
+
+    const ubicacionFinal = prefijo + (sub ? sub + "/" : "") + codigo;
+    const btn = overlay.querySelector("#un-guardar");
+    btn.disabled = true; btn.textContent = "Guardando…";
+    try{
+      const r1 = await rpc("app_agregar_linea", {
+        p_sesion: S.sesion.sesion_id, p_ubicacion: ubicacionFinal,
+        p_sku: sku, p_usuario: S.usuario.usuario_id, p_empresa: emp,
+      });
+      const linea = r1 && r1[0];
+      const idem = `web-nuevaubic-${linea.linea_id}-${Date.now()}`;
+      const r2 = await rpc("app_registrar_conteo", {
+        p_linea: linea.linea_id, p_usuario: S.usuario.usuario_id,
+        p_cantidad: cantidad, p_idem: idem,
+      });
+      const res = r2 && r2[0];
+      toast(res && res.estado ? `Guardado. Resultado: ${res.estado}` : "Ubicación y producto registrados.");
+      overlay.remove();
+      S.ubicActual = {ubicacion: ubicacionFinal, zona: ""};
+      S.pantalla = "lineas"; render();
+      cargarLineas(ubicacionFinal);
+    }catch(e){
+      toast("Error: " + e.message);
+      btn.disabled = false; btn.textContent = "Guardar";
+    }
+  };
 }
 
 /* ------------------------------- LÍNEAS ------------------------------------ */
