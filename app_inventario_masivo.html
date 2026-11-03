@@ -176,7 +176,7 @@ function fmtFecha(iso){
 const S = {
   usuario: null,       // {usuario_id, nombre, rol}
   sesion: null,        // {sesion_id, nombre, bodega, ...}
-  pantalla: "login",   // login | sesiones | menu | ubicaciones | lineas | contar | recuentos | diferidas | supervisor | asignar | tolerancias
+  pantalla: "login",   // login | sesiones | menu | ubicaciones | lineas | contar | recuentos | diferidas | supervisor | asignar | tolerancias | detalle
   ubicActual: null,
   lineaActual: null,
   lineasUbicacion: [],
@@ -221,6 +221,7 @@ function render(){
   else if(S.pantalla === "supervisor") app.appendChild(viewSupervisor());
   else if(S.pantalla === "asignar") app.appendChild(viewAsignacion());
   else if(S.pantalla === "tolerancias") app.appendChild(viewTolerancias());
+  else if(S.pantalla === "detalle") app.appendChild(viewDetalle());
 }
 
 function topbar(titulo, onBack){
@@ -918,10 +919,20 @@ function viewSupervisor(){
       </div>`).join("");
   }
   el.appendChild(card);
+
+  const btnDetalle = document.createElement("button");
+  btnDetalle.textContent = "Ver detalle línea por línea";
+  btnDetalle.className = "secondary";
+  btnDetalle.style.width = "100%";
+  btnDetalle.style.marginTop = "10px";
+  btnDetalle.onclick = ()=>{ S.pantalla = "detalle"; render(); cargarDetalle(); };
+  el.appendChild(btnDetalle);
+
   if(_kpis && _kpis.length){
     const btnCerrar = document.createElement("button");
     btnCerrar.textContent = "Cerrar sesión de inventario";
     btnCerrar.style.width = "100%";
+    btnCerrar.style.marginTop = "10px";
     btnCerrar.onclick = async ()=>{
       if(!confirm("¿Cerrar la sesión de inventario? Debe estar todo contado y verificado.")) return;
       try{
@@ -1089,6 +1100,114 @@ function viewTolerancias(){
         cargarTolerancias();
       }catch(e){ toast("Error: " + e.message); }
     };
+    el.appendChild(card);
+  });
+  return el;
+}
+
+/* --------------------------------- DETALLE (supervisor) --------------------- */
+let _detalle = null;
+let _zonasDetalle = null;
+let _filtroDetalle = {estado: "", zona: "", busqueda: ""};
+const ESTADOS_DETALLE = [
+  ["", "Todos los estados"], ["pendiente", "Sin contar"], ["aceptada", "Aceptada"],
+  ["verificacion", "Esperando recuento"], ["verif3", "Esperando 3er conteo"],
+  ["confirmada", "Confirmada"], ["descartada", "Descartada"],
+  ["arbitraje", "Con el supervisor"], ["ajustada", "Resuelta por supervisor"],
+  ["diferida", "Diferida"], ["resuelta", "Diferida — resuelta"],
+];
+async function cargarDetalle(){
+  try{
+    const [filas, zonas] = await Promise.all([
+      rpc("app_sup_detalle", {
+        p_sesion: S.sesion.sesion_id, p_supervisor: S.usuario.usuario_id,
+        p_estado: _filtroDetalle.estado || null,
+        p_zona: _filtroDetalle.zona || null,
+        p_busqueda: _filtroDetalle.busqueda || null,
+      }),
+      _zonasDetalle || rpc("app_sup_zonas", {p_sesion: S.sesion.sesion_id, p_supervisor: S.usuario.usuario_id}),
+    ]);
+    _detalle = filas;
+    _zonasDetalle = zonas;
+  }catch(e){ toast("Error: " + e.message); _detalle = []; }
+  if(S.pantalla === "detalle") render();
+}
+function viewDetalle(){
+  const el = document.createElement("div");
+  el.appendChild(topbar("Detalle", ()=>{ S.pantalla="supervisor"; render(); }));
+
+  const filtros = document.createElement("div");
+  filtros.className = "card";
+  filtros.style.marginBottom = "10px";
+  filtros.innerHTML = `
+    <input id="f-busca" placeholder="Buscar SKU, producto o ubicación…" value="${(_filtroDetalle.busqueda||"").replace(/"/g,'&quot;')}">
+    <div class="row" style="margin-top:8px;gap:8px">
+      <select id="f-estado" style="flex:1"></select>
+      <select id="f-zona" style="flex:1"></select>
+    </div>
+  `;
+  const selEstado = filtros.querySelector("#f-estado");
+  selEstado.innerHTML = ESTADOS_DETALLE.map(([v,t])=>
+    `<option value="${v}" ${v===_filtroDetalle.estado?"selected":""}>${t}</option>`).join("");
+  const selZona = filtros.querySelector("#f-zona");
+  const zonas = _zonasDetalle || [];
+  selZona.innerHTML = `<option value="">Todas las zonas</option>` +
+    zonas.map(z=>`<option value="${z.zona_id}" ${z.zona_id===_filtroDetalle.zona?"selected":""}>${z.nombre}</option>`).join("");
+  const aplicar = ()=>{
+    _filtroDetalle = {
+      busqueda: filtros.querySelector("#f-busca").value.trim(),
+      estado: selEstado.value, zona: selZona.value,
+    };
+    _detalle = null; render(); cargarDetalle();
+  };
+  selEstado.onchange = aplicar;
+  selZona.onchange = aplicar;
+  filtros.querySelector("#f-busca").addEventListener("keydown", e=>{ if(e.key==="Enter") aplicar(); });
+  el.appendChild(filtros);
+
+  if(_detalle === null){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="empty"><span class="spinner"></span><br>Cargando…</div>`;
+    el.appendChild(card);
+    return el;
+  }
+  if(!_detalle.length){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="empty">Sin líneas con esos filtros.</div>`;
+    el.appendChild(card);
+    return el;
+  }
+  const resumen = document.createElement("div");
+  resumen.className = "muted";
+  resumen.style.cssText = "font-size:12px;margin-bottom:8px";
+  resumen.textContent = `${_detalle.length} línea(s)${_detalle.length === 300 ? " (mostrando las primeras 300 — afina el filtro)" : ""}`;
+  el.appendChild(resumen);
+
+  _detalle.forEach(l=>{
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.marginBottom = "8px";
+    card.innerHTML = `
+      <div class="row" style="align-items:flex-start">
+        <div>
+          <div style="font-weight:600">${l.sku} ${l.empresa && l.empresa !== "UNICA" ? `<span class="pill pill-c">${l.empresa}</span>` : ""}</div>
+          <div class="muted" style="font-size:12px">${l.producto || ""}</div>
+          <div class="muted" style="font-size:12px">${l.zona || "—"} · ${l.ubicacion}</div>
+          <div style="margin-top:4px">${pillAbc(l.clase_abc)} ${pillEstado(l.estado)}</div>
+          ${l.ultimo_contador ? `<div class="muted" style="font-size:11px;margin-top:2px">contó: ${l.ultimo_contador}</div>` : ""}
+        </div>
+        <div style="text-align:right">
+          <div class="muted" style="font-size:12px">teórico / actual</div>
+          <div style="font-weight:700">${fmt(l.esperado)} / ${l.final_qty !== null ? fmt(l.final_qty) : "—"}</div>
+          ${(l.final_qty !== null && l.diferencia != 0) ? `
+            <div class="muted" style="font-size:11px">dif: ${fmt(l.diferencia)} (${fmtMoney(l.valor_diferencia)})</div>` : ""}
+          ${(l.ciclico_qty && l.ciclico_qty !== 0) ? `
+            <div class="muted" style="font-size:11px">CICLICO: ${fmt(l.ciclico_qty)}</div>` : ""}
+        </div>
+      </div>
+    `;
     el.appendChild(card);
   });
   return el;
