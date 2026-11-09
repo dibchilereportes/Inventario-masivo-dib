@@ -411,6 +411,16 @@ function zonaCorta(nombre){
   if(partes.length <= 1) return nombre;
   return `${partes[0]} (+${partes.length - 1} zonas más en tu sector)`;
 }
+function partirSkuTexto(texto){
+  // Cuando el contador escribe o pega "SKU NOMBRE" junto y no hay coincidencia
+  // en el buscador, separa el SKU (primer token con "-" o "/", como
+  // T021359-0000/36) del nombre que sigue, en vez de guardar todo pegado.
+  texto = (texto || "").trim();
+  const m = texto.match(/^(\S*[-/]\S*)\s+(.+)$/);
+  if(m) return {sku: m[1].toUpperCase(), producto: m[2].trim()};
+  return {sku: texto.toUpperCase(), producto: null};
+}
+
 const EMPRESA_DE_BODEGA = {
   "Bodega Central": "DIB", "DECOSTORE El Salto": "DECOSTORE", "Bodega 56": "DECOEXPRESS",
 };
@@ -558,11 +568,28 @@ function abrirUbicacionNueva(){
     inputSubOtro.style.display = selSub.value === "__otro__" ? "" : "none";
   };
 
+  let productoSel = null;
   const buscar = overlay.querySelector("#un-buscar");
   const resultados = overlay.querySelector("#un-resultados");
+
+  function fijarSeleccion(sku, producto){
+    skuSel = sku; productoSel = producto;
+    buscar.style.display = "none";
+    resultados.innerHTML = `
+      <div class="list-item">
+        <div><div style="font-weight:600">${sku}</div>
+          <div class="muted" style="font-size:12px">${producto || "(sin nombre conocido)"}</div></div>
+        <button class="ghost" id="un-quitar-sel">✕</button>
+      </div>`;
+    resultados.querySelector("#un-quitar-sel").onclick = ()=>{
+      skuSel = null; productoSel = null;
+      buscar.style.display = ""; buscar.value = ""; resultados.innerHTML = "";
+      buscar.focus();
+    };
+  }
+
   let timer = null;
   buscar.oninput = ()=>{
-    skuSel = null;
     clearTimeout(timer);
     const texto = buscar.value.trim();
     if(texto.length < 2){ resultados.innerHTML = ""; return; }
@@ -577,9 +604,7 @@ function abrirUbicacionNueva(){
           item.innerHTML = `<div><div style="font-weight:600">${p.sku}</div>
             <div class="muted" style="font-size:12px">${p.producto || ""}</div></div>`;
           item.onclick = ()=>{
-            skuSel = p.sku;
-            buscar.value = `${p.sku} — ${p.producto || ""}`;
-            resultados.innerHTML = "";
+            fijarSeleccion(p.sku, p.producto);
           };
           resultados.appendChild(item);
         });
@@ -597,7 +622,11 @@ function abrirUbicacionNueva(){
     const sub = selSub.value === "__otro__" ? inputSubOtro.value.trim() : selSub.value;
     const codigo = overlay.querySelector("#un-codigo").value.trim().toUpperCase();
     if(!codigo){ toast("Escribe el código de la ubicación."); return; }
-    const sku = skuSel || buscar.value.trim().toUpperCase();
+    let sku = skuSel, producto = productoSel;
+    if(!sku){
+      const parcial = partirSkuTexto(buscar.value);
+      sku = parcial.sku; producto = parcial.producto;
+    }
     if(!sku){ toast("Indica el SKU o producto."); return; }
     const cantidadTxt = overlay.querySelector("#un-cantidad").value.trim();
     const cantidad = parseFloat(cantidadTxt);
@@ -609,7 +638,7 @@ function abrirUbicacionNueva(){
     try{
       const r1 = await rpc("app_agregar_linea", {
         p_sesion: S.sesion.sesion_id, p_ubicacion: ubicacionFinal,
-        p_sku: sku, p_usuario: S.usuario.usuario_id, p_empresa: emp,
+        p_sku: sku, p_usuario: S.usuario.usuario_id, p_empresa: emp, p_producto: producto,
       });
       const linea = r1 && r1[0];
       const idem = `web-nuevaubic-${linea.linea_id}-${Date.now()}`;
@@ -798,7 +827,7 @@ function abrirAgregarProducto(){
         libre.className = "list-item";
         libre.style.cursor = "pointer";
         libre.innerHTML = `<div class="muted">Usar "<b>${texto.toUpperCase()}</b>" tal cual (no está en la lista)</div>`;
-        libre.onclick = ()=> elegir(texto.toUpperCase(), null);
+        libre.onclick = ()=>{ const p = partirSkuTexto(texto); elegir(p.sku, p.producto); };
         resultados.appendChild(libre);
         if(!res || !res.length){
           resultados.insertAdjacentHTML("afterbegin",
@@ -810,18 +839,52 @@ function abrirAgregarProducto(){
 }
 
 function continuarAgregarProducto(sku, producto){
-  let empresa = null;
   if(S.sesion.bodegas && S.sesion.bodegas.length > 1){
-    empresa = prompt("¿De qué empresa es? (DIB / DECOSTORE / DECOEXPRESS)");
-    if(!empresa || !empresa.trim()) return;
-    empresa = empresa.trim().toUpperCase();
+    elegirEmpresaAgregarProducto((empresa)=> guardarProductoAgregado(sku, producto, empresa));
+    return;
   }
+  guardarProductoAgregado(sku, producto, null);
+}
+
+// Selector de empresa por botones (bodega espejo: DIB/DECOSTORE comparten
+// posicion fisica) -- antes era un prompt() de texto libre, donde un typo
+// mandaba una empresa invalida y el conteo quedaba "huerfano". Solo las 3
+// empresas conocidas, nunca texto digitado.
+function elegirEmpresaAgregarProducto(onElegida){
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:41;display:flex;align-items:flex-end";
+  overlay.innerHTML = `
+    <div class="card" style="width:100%;margin:0;border-radius:16px 16px 0 0">
+      <div class="row">
+        <h2 style="margin:0">¿De qué empresa es?</h2>
+        <button class="ghost" id="ae-cerrar">✕</button>
+      </div>
+      <div id="ae-opciones"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#ae-cerrar").onclick = ()=> overlay.remove();
+  overlay.onclick = (e)=>{ if(e.target === overlay) overlay.remove(); };
+
+  const opciones = overlay.querySelector("#ae-opciones");
+  ["DIB", "DECOSTORE", "DECOEXPRESS"].forEach(emp=>{
+    const item = document.createElement("div");
+    item.className = "list-item";
+    item.style.cursor = "pointer";
+    item.style.fontWeight = "600";
+    item.textContent = emp;
+    item.onclick = ()=>{ overlay.remove(); onElegida(emp); };
+    opciones.appendChild(item);
+  });
+}
+
+function guardarProductoAgregado(sku, producto, empresa){
   (async ()=>{
     try{
       const res = await rpc("app_agregar_linea", {
         p_sesion: S.sesion.sesion_id, p_ubicacion: S.ubicActual.ubicacion,
         p_sku: sku, p_usuario: S.usuario.usuario_id,
-        p_empresa: empresa,
+        p_empresa: empresa, p_producto: producto,
       });
       const r = res && res[0];
       toast(r && r.ya_existia ? "Ese SKU ya estaba en la lista." : "Agregado. Ya puedes contarlo.");
