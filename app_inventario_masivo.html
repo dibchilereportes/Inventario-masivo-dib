@@ -942,7 +942,13 @@ function viewContar(){
       });
       const r = res && res[0];
       if(r && r.requiere_recuento){
-        toast("Guardado. Diferencia fuera de tolerancia: queda para recuento a ciegas.");
+        if(S.sesion.permite_autorecuento){
+          toast("Fuera de tolerancia: hazme el recuento a ciegas ahora mismo.");
+          S.pantalla = "contar-ciego";
+          renderContarCiego();
+          return;
+        }
+        toast("Guardado. Diferencia fuera de tolerancia: queda para recuento a ciegas (otro contador).");
       } else {
         toast("Conteo guardado.");
       }
@@ -1037,6 +1043,11 @@ function renderContarCiego(){
         p_cantidad: parseFloat(val), p_idem: idem,
       });
       const r = res && res[0];
+      if(r && r.requiere_recuento && S.sesion.permite_autorecuento){
+        toast(`Sigue fuera de tolerancia (${r.estado}): va el 3er conteo ahora mismo.`);
+        renderContarCiego();
+        return;
+      }
       toast(r && r.estado ? `Resultado: ${r.estado}` : "Recuento guardado.");
       S.pantalla = "recuentos"; render(); cargarRecuentos();
     }catch(e){
